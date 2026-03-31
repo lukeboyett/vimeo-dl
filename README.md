@@ -4,6 +4,26 @@ A container image based on [Javi3rV script](https://gist.github.com/alexeygrigor
 It supports _playlist.json_ and _master.json_ urls.
 
 
+## Resume support
+
+This fork adds **automatic resume** for interrupted downloads. If a download fails mid-way (network hiccup, WiFi drop, etc.), simply re-run the same command and it will pick up where it left off — no need to re-download completed segments.
+
+How it works:
+- Segments are saved to a deterministic temp directory (`.vimeo-dl-<hash>`) based on the source URL
+- A progress manifest tracks which segments completed successfully, including file size validation
+- On re-run, already-downloaded segments are skipped automatically
+- Failed segments are retried with exponential backoff (configurable via `MAX_RETRIES`, default: 5)
+- Temp files are only cleaned up after the final video is fully assembled
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `SRC_URL` | _(prompt)_ | Source manifest URL |
+| `OUT_FILE` | _(prompt)_ | Output filename |
+| `MAX_WORKERS` | `5` | Parallel download threads (max 15) |
+| `MAX_RETRIES` | `5` | Retry attempts per segment |
+
 ## Example usage
 
 ### From docker CLI
