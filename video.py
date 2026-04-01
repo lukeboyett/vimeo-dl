@@ -11,8 +11,12 @@ import base64
 import time
 import shutil
 import threading
+import warnings
 from shutil import which
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Suppress noisy multiprocessing resource_tracker warnings (PyInstaller artifact)
+warnings.filterwarnings('ignore', message='resource_tracker:.*', category=UserWarning)
 
 __version__ = '0.3.0'
 
