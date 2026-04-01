@@ -66,7 +66,9 @@ characters (?, &, =, etc). Use single quotes to be safe.''',
         '-v', '--version', action='version', version=f'%(prog)s {__version__}',
     )
 
-    args = parser.parse_args()
+    # parse_known_args ignores unrecognized flags (e.g. Python interpreter
+    # flags like -B -S -I that PyInstaller leaves in sys.argv)
+    args, _ = parser.parse_known_args()
 
     # Resolve values: CLI args > env vars > interactive prompt
     args.url = args.url or os.getenv('SRC_URL') or input("Enter playlist.json or master.json URL (use quotes!): ")
