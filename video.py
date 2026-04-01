@@ -250,6 +250,9 @@ def download(what, to, base, temp_dir, stream_type, phase_num, total_phases, ove
 
 
 def ensure_deps():
+    # Skip dep install when running as a compiled binary (PyInstaller)
+    if getattr(sys, '_MEIPASS', None):
+        return
     import importlib.metadata
     required = {'requests', 'tqdm', 'moviepy'}
     installed = {pkg.metadata['Name'] for pkg in importlib.metadata.distributions()}
