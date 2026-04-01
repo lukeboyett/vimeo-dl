@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-31
+### :sparkles: New Features
+- Resume support for interrupted downloads — segments are saved to a deterministic temp directory with a progress manifest; re-running the same command skips already-downloaded segments
+- Retry with exponential backoff for failed segments (configurable via `--retries`, default: 5)
+- CLI argument parsing with `--help`, `-o`, `-w`, `-r`, `-t`, `--clean`, `-v` flags
+- Byte-based progress tracking — overall progress bar reflects actual data volume, not segment count
+- Per-phase progress bars (Video, Audio) plus an Overall bar with percentage, transfer rate, and ETA
+- Summary header showing resolution, total size, segment counts, and audio bitrate
+- Phase indicators ([1/3], [2/3], [3/3]) for video download, audio download, and mux
+- `--clean` flag to start fresh by removing previous temp/resume files
+- `--temp-dir` flag to specify where temp/resume files are stored
+- Thread-safe progress manifest with atomic file writes
+- PyInstaller compatibility for compiled binary distribution
+
+### :bug: Bug Fixes
+- Thread-safe progress file writes prevent race condition crash during concurrent segment downloads
+- Truncated verbose SSL/connection error messages for readable retry output
+- Suppressed PyInstaller multiprocessing resource_tracker warnings
+
 ## [0.2.1] - 2025-01-31
 ### :wrench: Chores
 - [`cb11e69`](https://github.com/davidecavestro/vimeo-dl/commit/cb11e6972022db657b55eb0d0b2874725ef48501) - autoinstall deps *(commit by [@davidecavestro](https://github.com/davidecavestro))*
@@ -27,3 +46,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.0]: https://github.com/davidecavestro/vimeo-dl/compare/0.0.0...0.1.0
 [0.2.0]: https://github.com/davidecavestro/vimeo-dl/compare/0.1.0...0.2.0
 [0.2.1]: https://github.com/davidecavestro/vimeo-dl/compare/0.2.0...0.2.1
+[0.3.0]: https://github.com/lukeboyett/vimeo-dl/compare/0.2.1...main
