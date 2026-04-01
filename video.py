@@ -370,7 +370,7 @@ def download_single(url, name, args, tools):
     if audio_present:
         total_phases = 3
 
-    print_header(f'vimeo-dl -> {name}')
+    print_header(f'vimeo-dl v{__version__} -> {name}')
     print(f'  Resolution:  {video_info["width"]}x{video_info["height"]}')
     print(f'  Total size:  {format_size(grand_total_bytes)}')
     print(f'  Video:       {len(video_info["segments"])} segments ({format_size(video_total_bytes)})')
@@ -528,4 +528,11 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        # PyInstaller can throw zlib decompression errors during cleanup/exit.
+        # If the download already completed, exit cleanly.
+        if 'zlib' in type(e).__module__ or 'zlib' in str(type(e)):
+            sys.exit(0)
+        raise
