@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-31
+### :sparkles: New Features
+- **Graceful Ctrl-C** — first Ctrl-C lets in-flight segments finish and saves progress cleanly; second Ctrl-C force-quits
+- **Disk space check** — warns before downloading if available space looks insufficient (estimates 2.5x download size for segments + assembly + mux)
+- **Batch mode** (`-b`/`--batch`) — download multiple videos from a tab-separated file (`URL<tab>OUTPUT_NAME`, one per line)
+- Refactored download logic into `download_single()` for cleaner batch/single code paths
+
 ## [0.3.0] - 2026-03-31
 ### :sparkles: New Features
 - Resume support for interrupted downloads — segments are saved to a deterministic temp directory with a progress manifest; re-running the same command skips already-downloaded segments
@@ -46,4 +53,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.0]: https://github.com/davidecavestro/vimeo-dl/compare/0.0.0...0.1.0
 [0.2.0]: https://github.com/davidecavestro/vimeo-dl/compare/0.1.0...0.2.0
 [0.2.1]: https://github.com/davidecavestro/vimeo-dl/compare/0.2.0...0.2.1
-[0.3.0]: https://github.com/lukeboyett/vimeo-dl/compare/0.2.1...main
+[0.3.0]: https://github.com/lukeboyett/vimeo-dl/compare/0.2.1...0.3.0
+[0.4.0]: https://github.com/lukeboyett/vimeo-dl/compare/0.3.0...main

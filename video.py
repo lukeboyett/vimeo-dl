@@ -9,6 +9,7 @@ import json
 import hashlib
 import base64
 import time
+import signal
 import shutil
 import threading
 import warnings
@@ -18,14 +19,28 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Suppress noisy multiprocessing resource_tracker warnings (PyInstaller artifact)
 warnings.filterwarnings('ignore', message='resource_tracker:.*', category=UserWarning)
 
-__version__ = '0.3.0'
+__version__ = '0.4.0'
 
 # Lock for thread-safe progress updates
 _progress_lock = threading.Lock()
 
+# Graceful shutdown flag
+_shutdown = threading.Event()
+
 # Lazy-loaded after ensure_deps()
 requests = None
 tqdm = None
+
+
+def _handle_signal(signum, frame):
+    """Handle Ctrl-C: signal threads to stop, let them finish current work."""
+    if _shutdown.is_set():
+        # Second Ctrl-C: force exit
+        print('\n  Forced exit. Progress has been saved.')
+        os._exit(1)
+    _shutdown.set()
+    print('\n  Shutting down gracefully... finishing current segments.')
+    print('  (press Ctrl-C again to force quit)')
 
 
 def parse_args():
@@ -36,6 +51,12 @@ def parse_args():
   vimeo-dl 'https://...playlist.json?...' -o my_video
   vimeo-dl 'https://...master.json?...' -o my_video
   vimeo-dl 'https://...playlist.json?...' -o /path/to/my_video -w 10
+  vimeo-dl --batch urls.txt -w 10
+
+batch file format (one per line, tab-separated):
+  URL<tab>OUTPUT_NAME
+  https://...playlist.json?...\tmy_video
+  https://...playlist.json?...\tmy_other_video
 
 NOTE: Always quote the URL to prevent shell interpretation of special
 characters (?, &, =, etc). Use single quotes to be safe.''',
@@ -49,6 +70,10 @@ characters (?, &, =, etc). Use single quotes to be safe.''',
     parser.add_argument(
         '-o', '--output', default=None, metavar='NAME',
         help='output filename without .mp4 extension (can include path)',
+    )
+    parser.add_argument(
+        '-b', '--batch', default=None, metavar='FILE',
+        help='batch file with one URL<tab>OUTPUT_NAME per line',
     )
     parser.add_argument(
         '-w', '--workers', type=int, default=None, metavar='N',
@@ -76,9 +101,11 @@ characters (?, &, =, etc). Use single quotes to be safe.''',
     filtered_argv = [a for a in sys.argv[1:] if a not in pyinstaller_flags]
     args = parser.parse_args(filtered_argv)
 
-    # Resolve values: CLI args > env vars > interactive prompt
-    args.url = args.url or os.getenv('SRC_URL') or input("Enter playlist.json or master.json URL (use quotes!): ")
-    args.output = args.output or os.getenv('OUT_FILE') or input("Enter output filename (without .mp4): ")
+    # Batch mode doesn't need url/output
+    if not args.batch:
+        args.url = args.url or os.getenv('SRC_URL') or input("Enter playlist.json or master.json URL (use quotes!): ")
+        args.output = args.output or os.getenv('OUT_FILE') or input("Enter output filename (without .mp4): ")
+
     args.workers = min(args.workers or int(os.getenv('MAX_WORKERS', 5)), 15)
     args.retries = args.retries or int(os.getenv('MAX_RETRIES', 5))
 
@@ -99,6 +126,13 @@ def format_size(nbytes):
             return f'{nbytes:.1f}{unit}'
         nbytes /= 1024
     return f'{nbytes:.1f}PB'
+
+
+def check_disk_space(path, required_bytes):
+    """Check if there's enough disk space. Returns (ok, available_bytes)."""
+    stat = os.statvfs(path)
+    available = stat.f_bavail * stat.f_frsize
+    return available >= required_bytes, available
 
 
 def print_header(text):
@@ -154,7 +188,13 @@ def download_segment(segment_url, segment_path, segment_key, segment_size,
     if is_segment_complete(segment_path, progress, segment_key):
         return segment_key, True, 'skipped'
 
+    if _shutdown.is_set():
+        return segment_key, False, 'cancelled'
+
     for attempt in range(1, max_retries + 1):
+        if _shutdown.is_set():
+            return segment_key, False, 'cancelled'
+
         try:
             resp = requests.get(segment_url, stream=True, timeout=60)
             if resp.status_code != 200:
@@ -165,6 +205,8 @@ def download_segment(segment_url, segment_path, segment_key, segment_size,
 
             with open(segment_path, 'wb') as segment_file:
                 for chunk in resp.iter_content(chunk_size=8192):
+                    if _shutdown.is_set():
+                        return segment_key, False, 'cancelled'
                     segment_file.write(chunk)
 
             file_size = os.path.getsize(segment_path)
@@ -183,7 +225,6 @@ def download_segment(segment_url, segment_path, segment_key, segment_size,
             return segment_key, True, 'downloaded'
 
         except (requests.exceptions.RequestException, IOError) as e:
-            # Extract just the root cause, not the full URL
             err_msg = str(e)
             if 'Caused by' in err_msg:
                 err_msg = err_msg[err_msg.rfind('Caused by'):]
@@ -224,6 +265,7 @@ def download(what, to, base, temp_dir, stream_type, phase_num, total_phases, ove
         print(f'  Resuming: {already_done_count}/{total_segments} segments ({format_size(already_done_bytes)}) already downloaded')
 
     failed_segments = []
+    cancelled = False
 
     bar_format = f'  {label}    |{{bar:40}}| {{percentage:3.0f}}% {{n_fmt}}/{{total_fmt}} [{{elapsed}}<{{remaining}}, {{rate_fmt}}]'
     with tqdm(total=total_bytes, initial=already_done_bytes, bar_format=bar_format,
@@ -243,14 +285,23 @@ def download(what, to, base, temp_dir, stream_type, phase_num, total_phases, ove
 
             for future in as_completed(futures):
                 seg_key, success, status = future.result()
-                if not success:
+                if status == 'cancelled':
+                    cancelled = True
+                elif not success:
                     failed_segments.append(seg_key)
+
+    if cancelled:
+        progress = load_progress(temp_dir)
+        done = sum(1 for i, key in enumerate(segment_keys)
+                   if is_segment_complete(segment_paths[i], progress, key))
+        print(f'\n  Stopped. {done}/{total_segments} segments saved. Run again to resume.')
+        sys.exit(0)
 
     if failed_segments:
         print(f'\n  ERROR: {len(failed_segments)} segments failed after {args.retries} retries each')
         print(f'  Failed: {failed_segments[:10]}{"..." if len(failed_segments) > 10 else ""}')
         print(f'  Run the command again to retry. Progress saved in {temp_dir}')
-        sys.exit(1)
+        return False
 
     print(f'  Assembling {total_segments} segments...', end=' ', flush=True)
     with open(to, 'wb') as file:
@@ -261,39 +312,14 @@ def download(what, to, base, temp_dir, stream_type, phase_num, total_phases, ove
 
     output_size = os.path.getsize(to)
     print(f'{format_size(output_size)}')
+    return True
 
 
-def ensure_deps():
-    # Skip dep install when running as a compiled binary (PyInstaller)
-    if getattr(sys, '_MEIPASS', None):
-        return
-    import importlib.metadata
-    required = {'requests', 'tqdm', 'moviepy'}
-    installed = {pkg.metadata['Name'] for pkg in importlib.metadata.distributions()}
-    missing = required - installed
-    if missing:
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'])
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', *missing])
-
-
-def main():
-    args = parse_args()
-    ensure_deps()
-
-    global requests, tqdm
-    import requests as _requests
-    from tqdm import tqdm as _tqdm
-    requests = _requests
-    tqdm = _tqdm
-
-    tools = detect_tools()
-
-    url = args.url
-    name = args.output
-
+def download_single(url, name, args, tools):
+    """Download a single video. Returns True on success."""
     if 'deps://install' == url:
         print('exiting after installing dependencies')
-        sys.exit(0)
+        return True
 
     if 'master.json' in url:
         url = url[:url.find('?')] + '?query_string_ranges=1'
@@ -302,21 +328,21 @@ def main():
 
         if tools['youtube_dl']:
             subprocess.run(['youtube-dl', url, '-o', name])
-            sys.exit(0)
+            return True
 
         if tools['yt_dlp']:
             subprocess.run(['yt-dlp', url, '-o', name])
-            sys.exit(0)
+            return True
 
         print('you should have youtube-dl or yt-dlp in your PATH to download master.json like links')
-        sys.exit(1)
+        return False
 
     name += '.mp4'
     base_url = url[:url.rfind('/', 0, -26) + 1]
     response = requests.get(url)
     if response.status_code >= 400:
         print('error: cant get url content, test your link in browser, code=', response.status_code, '\ncontent:\n', response.content)
-        sys.exit(1)
+        return False
 
     content = response.json()
 
@@ -353,6 +379,17 @@ def main():
         print(f'  Audio rate:  {audio_info["bitrate"]//1000}kbps')
     print(f'  Workers: {args.workers} | Retries: {args.retries}')
 
+    # Check disk space (need room for segments + assembled files + final muxed output)
+    # Rough estimate: 2.5x the download size (segments + assembled video/audio + muxed output)
+    output_dir = os.path.dirname(os.path.abspath(name)) or os.getcwd()
+    space_needed = int(grand_total_bytes * 2.5)
+    space_ok, space_available = check_disk_space(output_dir, space_needed)
+    if not space_ok:
+        print(f'\n  WARNING: Low disk space!')
+        print(f'  Available:  {format_size(space_available)}')
+        print(f'  Estimated:  {format_size(space_needed)} (download + assembly + mux)')
+        print(f'  Proceeding anyway — monitor disk space during download.')
+
     temp_dir = get_temp_dir(url, args.temp_dir)
 
     if args.clean and os.path.exists(temp_dir):
@@ -367,18 +404,22 @@ def main():
 
     video_tmp_file = os.path.join(temp_dir, 'video.mp4')
     video = content['video'][vid_idx]
-    download(video, video_tmp_file, base_url + video['base_url'], temp_dir, 'video', 1, total_phases, overall_bar, args)
+    if not download(video, video_tmp_file, base_url + video['base_url'], temp_dir, 'video', 1, total_phases, overall_bar, args):
+        overall_bar.close()
+        return False
 
     if not audio_present:
         overall_bar.close()
         os.rename(video_tmp_file, name)
         shutil.rmtree(temp_dir, ignore_errors=True)
         print_header(f'Complete: {name}')
-        sys.exit(0)
+        return True
 
     audio_tmp_file = os.path.join(temp_dir, 'audio.mp4')
     audio = content['audio'][audio_idx]
-    download(audio, audio_tmp_file, base_url + audio['base_url'], temp_dir, 'audio', 2, total_phases, overall_bar, args)
+    if not download(audio, audio_tmp_file, base_url + audio['base_url'], temp_dir, 'audio', 2, total_phases, overall_bar, args):
+        overall_bar.close()
+        return False
 
     overall_bar.close()
 
@@ -392,7 +433,7 @@ def main():
         )
         if result.returncode != 0:
             print(f'  ffmpeg error: {result.stderr[-200:]}')
-            sys.exit(1)
+            return False
     else:
         print(f'  Using moviepy (no ffmpeg found)...', flush=True)
         try:
@@ -413,6 +454,77 @@ def main():
     shutil.rmtree(temp_dir, ignore_errors=True)
 
     print_header(f'Complete: {name} ({format_size(final_size)})')
+    return True
+
+
+def ensure_deps():
+    # Skip dep install when running as a compiled binary (PyInstaller)
+    if getattr(sys, '_MEIPASS', None):
+        return
+    import importlib.metadata
+    required = {'requests', 'tqdm', 'moviepy'}
+    installed = {pkg.metadata['Name'] for pkg in importlib.metadata.distributions()}
+    missing = required - installed
+    if missing:
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'])
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', *missing])
+
+
+def main():
+    # Install signal handler for graceful Ctrl-C
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
+    args = parse_args()
+    ensure_deps()
+
+    global requests, tqdm
+    import requests as _requests
+    from tqdm import tqdm as _tqdm
+    requests = _requests
+    tqdm = _tqdm
+
+    tools = detect_tools()
+
+    # Batch mode
+    if args.batch:
+        if not os.path.exists(args.batch):
+            print(f'error: batch file not found: {args.batch}')
+            sys.exit(1)
+
+        jobs = []
+        with open(args.batch, 'r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split('\t')
+                if len(parts) != 2:
+                    print(f'error: line {line_num}: expected URL<tab>OUTPUT_NAME, got {len(parts)} field(s)')
+                    sys.exit(1)
+                jobs.append((parts[0].strip(), parts[1].strip()))
+
+        print_header(f'Batch download: {len(jobs)} videos')
+        succeeded = 0
+        failed = 0
+
+        for i, (job_url, job_name) in enumerate(jobs, 1):
+            if _shutdown.is_set():
+                print(f'\n  Batch interrupted. {succeeded} completed, {len(jobs) - i + 1} remaining.')
+                break
+
+            print(f'\n  [{i}/{len(jobs)}] {job_name}')
+            _shutdown.clear()  # Reset for each job
+            if download_single(job_url, job_name, args, tools):
+                succeeded += 1
+            else:
+                failed += 1
+
+        print_header(f'Batch complete: {succeeded} succeeded, {failed} failed, {len(jobs) - succeeded - failed} skipped')
+        sys.exit(1 if failed > 0 else 0)
+
+    # Single download mode
+    download_single(args.url, args.output, args, tools)
 
 
 if __name__ == '__main__':
