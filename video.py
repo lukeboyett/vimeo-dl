@@ -95,10 +95,11 @@ characters (?, &, =, etc). Use single quotes to be safe.''',
         '-v', '--version', action='version', version=f'%(prog)s {__version__}',
     )
 
-    # PyInstaller leaves Python interpreter flags (-B, -S, -I, -c) in sys.argv.
-    # Filter them out before parsing so they don't interfere with our args.
+    # PyInstaller leaves Python interpreter flags and multiprocessing bootstrap
+    # args in sys.argv. Filter them out before parsing.
     pyinstaller_flags = {'-B', '-S', '-I', '-c'}
-    filtered_argv = [a for a in sys.argv[1:] if a not in pyinstaller_flags]
+    filtered_argv = [a for a in sys.argv[1:]
+                     if a not in pyinstaller_flags and 'multiprocessing' not in a]
     args = parser.parse_args(filtered_argv)
 
     # Batch mode doesn't need url/output
@@ -528,11 +529,22 @@ def main():
 
 
 if __name__ == '__main__':
+    # PyInstaller + multiprocessing: child processes re-invoke the binary with
+    # arguments like "from multiprocessing.resource_tracker import main;main(9)".
+    # Detect and exit early so they don't get parsed as a URL.
+    import multiprocessing
+    multiprocessing.freeze_support()
+
+    # Also check for resource_tracker invocations that slip through
+    if any('multiprocessing' in arg for arg in sys.argv[1:]):
+        sys.exit(0)
+
     try:
         main()
     except Exception as e:
-        # PyInstaller can throw zlib decompression errors during cleanup/exit.
+        # PyInstaller can throw zlib/import errors during cleanup/exit.
         # If the download already completed, exit cleanly.
-        if 'zlib' in type(e).__module__ or 'zlib' in str(type(e)):
+        err_type = f'{type(e).__module__}.{type(e).__name__}'
+        if 'zlib' in err_type or 'zlib' in str(e) or 'pyimod' in err_type.lower():
             sys.exit(0)
         raise
