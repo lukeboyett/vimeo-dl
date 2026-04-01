@@ -177,7 +177,13 @@ def download_segment(segment_url, segment_path, segment_key, segment_size,
             return segment_key, True, 'downloaded'
 
         except (requests.exceptions.RequestException, IOError) as e:
-            print(f'\n  ! segment {segment_key}: {e} (attempt {attempt}/{max_retries})')
+            # Extract just the root cause, not the full URL
+            err_msg = str(e)
+            if 'Caused by' in err_msg:
+                err_msg = err_msg[err_msg.rfind('Caused by'):]
+            elif len(err_msg) > 120:
+                err_msg = err_msg[:120] + '...'
+            print(f'\n  ! segment {segment_key}: {err_msg} (attempt {attempt}/{max_retries})')
             if attempt < max_retries:
                 time.sleep(2 ** attempt)
 
