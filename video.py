@@ -70,9 +70,11 @@ characters (?, &, =, etc). Use single quotes to be safe.''',
         '-v', '--version', action='version', version=f'%(prog)s {__version__}',
     )
 
-    # parse_known_args ignores unrecognized flags (e.g. Python interpreter
-    # flags like -B -S -I that PyInstaller leaves in sys.argv)
-    args, _ = parser.parse_known_args()
+    # PyInstaller leaves Python interpreter flags (-B, -S, -I, -c) in sys.argv.
+    # Filter them out before parsing so they don't interfere with our args.
+    pyinstaller_flags = {'-B', '-S', '-I', '-c'}
+    filtered_argv = [a for a in sys.argv[1:] if a not in pyinstaller_flags]
+    args = parser.parse_args(filtered_argv)
 
     # Resolve values: CLI args > env vars > interactive prompt
     args.url = args.url or os.getenv('SRC_URL') or input("Enter playlist.json or master.json URL (use quotes!): ")
