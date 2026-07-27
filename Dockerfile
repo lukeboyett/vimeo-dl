@@ -1,7 +1,7 @@
 FROM python
-RUN apt-get update && apt-get install -y \
-    youtube-dl \
-    && ln -s /usr/bin/yt-dlp /usr/local/bin/youtube-dl \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    yt-dlp \
     && rm -rf /var/lib/apt/lists/*
 VOLUME /downloads
 WORKDIR /downloads

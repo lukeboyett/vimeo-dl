@@ -11,6 +11,8 @@ Based on [Javi3rV's script](https://gist.github.com/alexeygrigorev/a1bc540925054
 - **Byte-based progress** — progress bars track actual data volume, not just segment count
 - **Multi-phase display** — separate progress bars for video, audio, and overall download
 - **CLI interface** — proper argument parsing with `--help`
+- **Verified segments** — advertised byte counts are enforced and SHA-256 hashes protect resumed data
+- **Script integration** — meaningful exit codes and newline-delimited JSON progress events
 
 ## Usage
 
@@ -29,6 +31,10 @@ vimeo-dl 'https://...playlist.json?...' -o my_video -w 10
 # Start fresh (discard previous partial download)
 vimeo-dl 'https://...playlist.json?...' -o my_video --clean
 
+# Non-interactive automation (NDJSON on stdout, diagnostics on stderr)
+vimeo-dl --no-input --json-progress 'https://...playlist.json?...' -o \
+  'EVENT 2026 Day 1 - HALL A PART 1 - competitions.mp4'
+
 # master.json URLs (delegates to yt-dlp/youtube-dl)
 vimeo-dl 'https://...master.json?...' -o my_video
 ```
@@ -44,6 +50,8 @@ usage: vimeo-dl [-h] [-o NAME] [-w N] [-r N] [-t DIR] [--clean] [-v] [url]
   -r, --retries N     retry attempts per failed segment (default: 5)
   -t, --temp-dir DIR  directory for temp/resume files (default: current directory)
   --clean             remove previous temp/resume files and start fresh
+  --no-input          never prompt; fail if URL or output is missing
+  --json-progress     emit newline-delimited JSON events on stdout
   -v, --version       show version
   -h, --help          show help
 ```
@@ -62,9 +70,14 @@ CLI args take priority. If not provided, these env vars are checked before promp
 ## How resume works
 
 - Segments are saved to a deterministic temp directory (`.vimeo-dl-<hash>`) based on the source URL
-- A progress manifest tracks completed segments with file size validation
+- A progress manifest tracks completed segments with expected-size and SHA-256 validation
 - On re-run, already-downloaded segments are skipped automatically
 - Temp files are only cleaned up after the final video is fully assembled
+
+`--json-progress` emits one JSON object per line. Event names include
+`download_start`, `resume`, `phase_start`, `segment_complete`, `phase_complete`,
+`complete`, `error`, and `cancelled`. A calling script should use the process exit
+code as the final authority: `0` success, `1` failure, and `130` interrupted.
 
 ## Docker
 

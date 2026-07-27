@@ -1,0 +1,18 @@
+# Download scratch dirs. video.py creates .vimeo-dl-<url_hash>/ next to the
+# output file and rmtree's it on success -- one left behind means that
+# download never finished muxing. They hold segment .tmp files plus the
+# assembled video.mp4/audio.mp4, so they get very large (tens of GB each).
+.vimeo-dl-*/
+
+# Downloaded media
+*.mp4
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec

@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-07-12
+### Fixed
+- Validate Vimeo/VHX segments against response Content-Length with a one-byte tolerance instead of rejecting off-by-one playlist sizes; retain SHA-256 resume verification.
+- Bootstrap missing dependencies in a user-cache venv on PEP 668 externally-managed Python installations, with actionable recovery guidance if creation fails.
+
+## [0.5.0] - 2026-07-12
+### Fixed
+- Remove a nested-lock deadlock that stopped every successful native segment download.
+- Download segments and assembled outputs atomically; validate advertised sizes and persist SHA-256 hashes for resume verification.
+- Propagate single-download and delegated downloader failures through the process exit code; interrupted runs exit 130.
+- Stop suppressing arbitrary zlib/import failures as successful exits.
+- Resolve Vimeo relative URLs correctly and avoid appending a duplicate `.mp4` extension.
+- Report corrupt resume manifests with an actionable `--clean` recovery instruction.
+- Install the actually invoked `yt-dlp` plus `ffmpeg` in the Docker image instead of creating a dangling executable symlink.
+
+### Added
+- `--json-progress` newline-delimited JSON events for calling scripts, with human diagnostics isolated on stderr.
+- `--no-input` for explicitly non-interactive runs; non-TTY invocation now fails instead of hanging on a prompt.
+- Unit tests for integrity, resume-manifest, and delegated-downloader behavior.
+
 ## [0.4.0] - 2026-03-31
 ### :sparkles: New Features
 - **Graceful Ctrl-C** — first Ctrl-C lets in-flight segments finish and saves progress cleanly; second Ctrl-C force-quits
